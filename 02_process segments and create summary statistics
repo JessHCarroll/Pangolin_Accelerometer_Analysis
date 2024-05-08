@@ -1,0 +1,520 @@
+#https://onlinelibrary.wiley.com/doi/full/10.1002/ece3.1660
+rm(list=ls())
+library(dplyr)
+library(lubridate)
+library(zoo)
+library(tidyr)
+library(tidyverse)
+
+setwd("C:/Users/user/Documents/R/Accelerometers")
+
+#import labelled accelerometer data
+
+#cindy
+cindy1<-read.csv("C:/Users/user/Documents/R/Accelerometers/seconds/cindy/cindy1_labs.csv") 
+cindy2<-read.csv("C:/Users/user/Documents/R/Accelerometers/seconds/cindy/cindy2_labs.csv") 
+
+cindy_df<-rbind(cindy1,cindy2)
+
+cindy_df$id<-"cindy"
+
+
+#dakari
+dakari1<-read.csv("C:/Users/user/Documents/R/Accelerometers/seconds/dakari/dakari_labs1.csv") 
+dakari2<-read.csv("C:/Users/user/Documents/R/Accelerometers/seconds/dakari/dakari_labs2.csv") 
+
+dakari_df<-rbind(dakari1,dakari2)
+dakari_df$id<-"dakari"
+
+#impi
+impi1<-read.csv("C:/Users/user/Documents/R/Accelerometers/seconds/impi/impi1_labs.csv") 
+impi2<-read.csv("C:/Users/user/Documents/R/Accelerometers/seconds/impi/impi2_labs.csv") 
+impi3<-read.csv("C:/Users/user/Documents/R/Accelerometers/seconds/impi/impi3_labs.csv") 
+impi4<-read.csv("C:/Users/user/Documents/R/Accelerometers/impi/impi_labs.csv") 
+
+impi_df<-rbind(impi1,impi2, impi3,impi4)
+impi_df$id<-"impi"
+
+#shura
+shura<-read.csv("C:/Users/user/Documents/R/Accelerometers/seconds/shura/shura_labs.csv") 
+shura$id<-"shura"
+
+#yakachena
+yakachena1<-read.csv("C:/Users/user/Documents/R/Accelerometers/seconds/yakachena/yakachena1_labs.csv") 
+yakachena2<-read.csv("C:/Users/user/Documents/R/Accelerometers/seconds/yakachena/yakachena2_labs.csv") 
+
+yakachena_df<-rbind(yakachena1,yakachena2)
+
+yakachena_df$id<-"yakachena"
+
+#champ
+
+champ<-read.csv("C:/Users/user/Documents/R/Accelerometers/champ/champ_labs.csv")
+champ2<-read.csv("C:/Users/user/Documents/R/Accelerometers/champ/champ_short_labs.csv")
+champ3<-read.csv("C:/Users/user/Documents/R/Accelerometers/champ/champ_3_labs.csv") 
+champ_df<-rbind(champ,champ2,champ3)
+
+champ_df$id<-"champ"
+
+
+
+all_accData<-rbind(cindy_df, dakari_df, impi_df,shura,yakachena_df, champ_df)
+
+all_accData_short<-all_accData[,c(1,2,3,4,5,6,10)]
+################################################################################
+#add den behaviour
+dakari_den<-read.csv("C:/Users/user/Documents/R/Accelerometers/nighttime/dakari_den.csv")
+dakari_den$id<-"dakari"
+head(dakari_den)
+tail(dakari_den)
+
+dakari_den<-dakari_den[c(0:24000),]
+
+impi_den<-read.csv("C:/Users/user/Documents/R/Accelerometers/nighttime/impi_den.csv")
+impi_den$id<-"impi"
+impi_den<-impi_den[c(0:24000),]
+
+yakachena_den<-read.csv("C:/Users/user/Documents/R/Accelerometers/nighttime/yakachena_den.csv")
+yakachena_den$id<-"yakachena"
+yakachena_den<-yakachena_den[c(0:24000),]
+
+den_data<-rbind(yakachena_den,impi_den,dakari_den)
+
+colnames(all_accData_short)
+colnames(den_data)
+
+den_data<-den_data[,c(1,5,6,7,18,19,20)]
+
+
+################################################################################
+all_accData_short_den<-rbind(all_accData_short,den_data)
+den_data$Behavior
+################################################################################
+
+acc.data<-all_accData_short #_den
+
+colnames(acc.data)[colnames(acc.data) == "Behavior"] ="behaviour"
+
+table(acc.data$id)
+
+write.csv(acc.data, "acc.data_IDscombined.csv")
+
+acc.data$behaviour[acc.data$behaviour == "crash"] <- "walk"
+acc.data$behaviour[acc.data$behaviour == "fall"] <- "walk"
+acc.data$behaviour[acc.data$behaviour == "get up"] <- "walk"
+acc.data$behaviour[acc.data$behaviour == "turn"] <- "walk"
+
+acc.data$behaviour[acc.data$behaviour == "back"] <- "low"
+acc.data$behaviour[acc.data$behaviour == "pause"] <- "low"
+acc.data$behaviour[acc.data$behaviour == "den"] <- "low"
+acc.data$behaviour[acc.data$behaviour == "upright_sensing"] <-"low"
+acc.data$behaviour[acc.data$behaviour == "grooming"] <- "low"
+acc.data$behaviour[acc.data$behaviour == "poop"] <-"low"
+
+#Label each behavioural segment by when the behaviour changes ####
+#This has to be done before the unlabelled rows can be removed as segments of the same behaviour,
+#as the segments of the same behaviour are separated by unlabelled rows
+acc.data$segID <- NA
+
+j<-2 #j is a counter, has to start at 2 as you can't change behaviour with only 1 row
+acc.data$segID[1] <- 1 #label the first row as 1 so that it is not NA
+
+
+# *note* This can take a long time with large files!
+#If there is a large unlabelled part of the track, replace nrow(acc.data) with a number
+
+for (i in 2:nrow(acc.data)){      #starts at 2
+  if (acc.data$behaviour[i] != acc.data$behaviour[i-1]){
+    acc.data$segID[i] <- j
+    j<-j+1
+  } else {
+    acc.data$segID[i] <- acc.data$segID[i-1]
+  }
+  print(nrow(acc.data)-i)
+}
+
+table(acc.data$segID)
+
+write.csv(acc.data, "acc.data_segslabs.csv")
+
+###############################include den data#################################
+acc.data<-read.csv("acc.data_segslabs.csv")
+
+acc.data<-acc.data[,-1]
+segnums<-tail(acc.data$segID, n=1)
+
+
+impi_den$segID<-segnums+1
+yakachena_den$segID<-segnums+2
+dakari_den$segID<-segnums+3
+
+
+den_data<-rbind(yakachena_den,impi_den,dakari_den)
+
+nrow(impi_den)
+colnames(den_data)
+
+colnames(acc.data)
+den_data<-den_data[,c(1,5,6,7,18,19,20,21)]
+colnames(den_data)
+colnames(den_data)[colnames(den_data) == "Behavior"] ="behaviour"
+
+
+acc.dataDen<-rbind(den_data, acc.data)
+write.csv(acc.dataDen,"acc.data_segslabs_withDen.csv")
+###############################################################################################################
+#now process and get different metrics for different rollign means
+rm(list=ls())
+library(dplyr)
+library(lubridate)
+library(zoo)
+library(tidyr)
+library(tidyverse)
+library(zoo)
+graphics.off()
+
+my.data<-read.csv("acc.data_segslabs_withDen.csv")
+table(my.data$segID)
+
+Hz<-50
+
+#1,2,3,4,5,6,7,8 seconds
+rolling50hz<-c(50,100,150,200,250,300,350,400)
+
+#loop through to get metrics of different segment lengths
+
+rolling<-rolling50hz
+
+#this section of code will trim segments to complete seconds
+for(r in 1:length(rolling)){
+#################parms begin###############
+attach(my.data)
+bl_len = rolling[r]
+
+#################parms end###############
+
+#################split data begin##############
+
+lab1 = unique(segID)
+
+empty = data.frame(matrix(nrow = 0, ncol = (ncol(my.data)+1)))
+names(empty) = c(names(my.data),"Block_ID")
+Block_ID_v = 1
+
+
+
+for(i in 1:length(lab1)){
+  
+  seg = my.data[which(my.data$segID == lab1[i]),]
+  
+  if(nrow(seg)>bl_len){
+    
+    trm =  floor(nrow(seg)/bl_len)*bl_len
+    seg = seg[1:trm,]
+    
+    Block_ID = rep(NA,nrow(seg))
+    
+    blks = nrow(seg)/bl_len  
+    
+    for(j in 1:blks){
+      
+      Block_ID[(1 + bl_len*(j-1)):(bl_len+bl_len*(j-1))] = Block_ID_v
+      Block_ID_v = Block_ID_v + 1
+      print(paste("block",Block_ID_v-1,seg[1,]$id,seg[1,]$behaviour,sep = " "))
+      
+    }
+    
+    seg = cbind(seg,Block_ID)
+    
+    empty = rbind(empty,seg)
+    
+  }
+  
+  
+}  
+
+#################split data end##############
+
+############test begin#################
+
+blocks = unique(empty$Block_ID)
+
+hold = c()
+for(i in 1:length(blocks)){
+  
+  print(length(
+    which(
+      empty$Block_ID == blocks[i]
+    )
+  ))
+  hold[i] = length(which(empty$Block_ID == blocks[i]))
+  
+}
+
+unique(hold)
+
+############test end#################
+
+
+write.csv(empty, paste0("50hzsegmented_accData",bl_len,  "seglength.csv"))
+
+detach(my.data)
+
+}
+
+#### resample here#####
+
+rm(list=ls())
+library(dplyr)
+library(lubridate)
+library(zoo)
+library(tidyr)
+library(tidyverse)
+library(zoo)
+
+
+full_freq<-c(1,2,3,4,5,6,7,8)
+
+for(s in 1:length(full_freq)){
+
+   input_file <- paste0("C:/Users/user/Documents/R/Accelerometers/50Hz/50hzsegmented_accData", full_freq[s],"seglength.csv")
+  
+  my.data<-read.csv(input_file)
+  
+  #add row nums to check
+  my.data$rownum<-1:nrow(my.data)
+  #format datetime to arrange by datetime just in case
+  my.data$time2<-as.POSIXct(my.data$time, "%Y-%m-%d %H:%M:%OS",tz = "UTC")
+
+# #resample
+slice_25<-my.data %>%
+  group_by(Block_ID) %>%
+  arrange(time2) %>%
+  slice(seq(1, n(), by =2))
+
+write.csv(slice_25,paste("resamp_25hz", full_freq[s],"seglength.csv"))
+
+
+# #resample
+slice_10<-my.data %>%
+  group_by(Block_ID) %>%
+  arrange(time2) %>%
+  slice(seq(1, n(), by =(5)))
+
+write.csv(slice_10,paste("resamp_10hz", full_freq[s],"seglength.csv"))
+
+#add new row for original 50hz
+data_len<-nrow(my.data)/50
+my.data$fhz<-rep(1:data_len, each=50)
+
+
+#now resample small freqs.
+slice_12<-my.data %>%
+  group_by(fhz) %>%
+  arrange(time2) %>%
+  slice(1:(n()-2)) %>%
+  slice(seq(0, n(), by =(4)))
+
+
+write.csv(slice_12,paste("resamp_12hz", full_freq[s],"seglength.csv"))
+
+#now resample small freqs.
+  slice_8<-my.data %>%
+  group_by(fhz) %>%
+  arrange(time2) %>%
+    slice(1:(n()-2)) %>%
+    slice(seq(0, n(), by =(6)))
+  
+
+write.csv(slice_8,paste("resamp_8hz", full_freq[s],"seglength.csv"))
+
+
+slice_6<-my.data %>%
+  group_by(fhz) %>%
+  arrange(time2) %>%
+  slice(1:(n()-2))%>%
+  slice(seq(0, n(), by =(8)))
+
+write.csv(slice_6,paste("resamp_6hz", full_freq[s],"seglength.csv"))
+
+#resample
+slice_4<-my.data %>%
+  group_by(fhz) %>%
+  arrange(time2) %>%
+  slice(1:(n()-2))%>%
+  slice(seq(0, n(), by =(12)))
+
+write.csv(slice_4,paste("resamp_4hz", full_freq[s],"seglength.csv"))
+
+
+#resample
+slice_2<-my.data %>%
+  group_by(fhz) %>%
+  arrange(time2) %>%
+  slice(1:(n()-2))%>%
+  slice(seq(0, n(), by =(24)))
+        
+write.csv(slice_2,paste("resamp_2hz", full_freq[s],"seglength.csv"))
+
+}
+
+############################################################################ calculate metrics for resampled freq.
+rm(list=ls())
+ library(dplyr)
+ library(lubridate)
+ library(zoo)
+ library(tidyr)
+ library(tidyverse)
+
+#1,2,3,4,5,6,7,8 seconds
+
+# now extract summary metrics
+
+#create a dataframe for different frequencies and smoothing windows
+hz_rp<-rep(c(25,12,10,8,6,4,2),8)
+
+samp_rep<-c(rep(c(1),7), rep(c(2),7),rep(c(3),7),rep(c(4),7),rep(c(5),7),rep(c(6),7),rep(c(7),7),rep(c(8),7))
+
+met_df<-as.data.frame(cbind(hz_rp,samp_rep))
+
+#loop through parameters in met_df and create summary statistics
+for (m in 1:nrow(met_df)){
+  input_file <- paste0("resamp_", met_df[m,1], "hz", " ", met_df[m,2], " seglength.csv")
+
+  data<-read.csv(input_file)
+  
+  print(paste("calculating metrics","smooth",met_df[m,2],"freq",met_df[m,1]))
+  
+Hz<-met_df[m,1]
+
+runmean<-met_df[m,2]
+
+#Set the require segment length
+
+freq <- Hz# The Frequency of accelerometry data (Hz)
+secs <- runmean # The number of seconds over which to calculate the desired metrics.
+
+numrows <- freq*secs # The number of rows required to calculate metrics over the chosen period. 
+
+train<-data
+
+train$pango_seg <- paste(train$id,train$Block_ID,sep="_") #If there are multiple individuals
+#head(train)
+
+#Calculate metrics ####
+
+#Calculate pitch & roll
+train$pitch <- atan((train$X/(sqrt((train$Y*train$Y)+(train$Z*train$Z)))))*(180/pi)
+train$roll <- atan((train$Y/(sqrt((train$X*train$X)+(train$Z*train$Z)))))*(180/pi) 
+
+#Calculate the metrics for each segment
+pango_seg <- unique(train$pango_seg)
+train_metrics <- as.data.frame(pango_seg)
+#head(train_metrics)
+
+
+#Create blank columns so that NA will appear if the calculations fail If this is not done, 
+#the value for the first iteration of the loop will appear when calculation fail, which'll be wrong
+#Loop will calculate:
+train_metrics$ODBA <- NA
+train_metrics$VeDBA <- NA
+
+train_metrics$meanX_surge <- NA
+train_metrics$stdevX_surge <-NA
+train_metrics$minX_surge <- NA
+train_metrics$maxX_surge <- NA
+
+train_metrics$pitch_mean <- NA
+train_metrics$pitch_stdev <- NA
+train_metrics$roll_mean <- NA
+train_metrics$roll_stdev <- NA
+#train_metrics$yaw_mean <- NA
+#train_metrics$yaw_stdev <- NA
+
+
+train_metrics$meanY_sway <- NA
+train_metrics$stdevY_sway <-NA
+train_metrics$minY_sway <- NA
+train_metrics$maxY_sway <- NA
+
+train_metrics$meanZ_heave <- NA
+train_metrics$stdevZ_heave <-NA
+train_metrics$minZ_heave <- NA
+train_metrics$maxZ_heave <- NA
+
+head(train_metrics)
+
+
+#Loop through each segment
+#This may take a few hours
+for (i in 1:nrow(train_metrics)){
+  
+  #Extract segment
+  seg <- subset(train,pango_seg == train_metrics$pango_seg[i])
+  
+  #####Calculate ODBA and VeDBA####
+  
+  #First calculate the static g force
+  StaticX <- sum(zoo::rollapply(seg$X,numrows,mean,fill=NA),na.rm = T)
+  StaticY <- sum(zoo::rollapply(seg$Y,numrows,mean,fill=NA),na.rm = T)
+  StaticZ <- sum(zoo::rollapply(seg$Z,numrows,mean,fill=NA),na.rm = T)
+  
+  #together should = ~1
+  #StaticX + StaticY + StaticZ
+  
+  ####Calculates DBA for each axis. 
+  seg$DynamicX <- seg$X-StaticX
+  seg$DynamicY <- seg$Y-StaticY
+  seg$DynamicZ <- seg$Z-StaticZ
+  
+  #Combines the DBA into ODBA or VeDBA
+  seg$ODBA  <- abs(seg$DynamicX)+abs(seg$DynamicY)+abs(seg$DynamicZ)
+  seg$VeDBA <- sqrt((seg$DynamicX^2)+(seg$DynamicY^2)+(seg$DynamicZ^2))
+  
+  #Store the mean OBDA/VeDBA for the segment
+  train_metrics$ODBA[i]  <- mean(seg$ODBA)
+  train_metrics$VeDBA[i] <- mean(seg$VeDBA)
+  
+  #Calculate and store trhe other metrics
+  train_metrics$meanX_surge[i] <- mean(seg$X)
+  train_metrics$stdevX_surge[i] <- sd(seg$X)
+  train_metrics$minX_surge[i] <- min(seg$X)
+  train_metrics$maxX_surge[i] <- max(seg$X)
+  
+  train_metrics$meanY_sway[i] <- mean(seg$Y)
+  train_metrics$stdevY_sway[i] <- sd(seg$Y)
+  train_metrics$minY_sway[i] <- min(seg$Y)
+  train_metrics$maxY_sway[i] <- max(seg$Y)
+  
+  train_metrics$meanZ_heave[i] <- mean(seg$Z)
+  train_metrics$stdevZ_heave[i] <- sd(seg$Z)
+  train_metrics$minZ_heave[i] <- min(seg$Z)
+  train_metrics$maxZ_heave[i] <- max(seg$Z)
+  
+  train_metrics$pitch_mean[i] <- mean(seg$pitch)
+  train_metrics$pitch_stdev[i] <- sd(seg$pitch)
+  train_metrics$roll_mean[i] <- mean(seg$roll)
+  train_metrics$roll_stdev[i] <- sd(seg$roll)
+ # train_metrics$yaw_mean[i] <- mean(seg$yaw)
+ # train_metrics$yaw_stdev[i] <- sd(seg$yaw)
+#  print(nrow(train_metrics)-i)
+  
+}
+
+#Remove any NAs
+
+train_metrics <- train_metrics[complete.cases(train_metrics),]
+
+#Match to add the behaviour label
+train_metrics$behaviour <- train$behaviour[match(train_metrics$pango_seg, train$pango_seg)] 
+
+#head(train_metrics)
+
+#write.csv(train_metrics,"trainingmetrics100_seglength.csv", row.names = F)
+write.csv(train_metrics, paste0(met_df[m,1], "hztrainingmetrics", met_df[m,2], "seglength.csv"), row.names = F)
+
+}
+
+
+
+
