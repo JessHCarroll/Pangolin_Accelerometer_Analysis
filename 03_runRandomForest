@@ -1,0 +1,207 @@
+#now run random forest
+rm(list=ls())
+
+library(caret)
+library(ranger)
+library(data.table)
+library(dplyr)
+
+input_data <- paste0("C:/Users/xcarrj/Desktop/turtleacc_analysis/Accelerometers/")
+
+#create dataframe different frequencies and smoothing windows.
+smooth<-c(rep(c(1),8), rep(c(2),8),rep(c(3),8),rep(c(4),8),rep(c(5),8),rep(c(6),8),rep(c(7),8),rep(c(8),8))
+freq<-rep(c(50,25,12,10,8,6,4,2),8)
+accuracy<-NA
+
+forest<-as.data.frame(cbind(smooth,freq, accuracy))
+
+
+#run random forest model. This will loop through paramteres above and save output of model, alongside filling in accuracy in dataframe
+#NOTE: select either activity levels or dicrete behaviours within loop
+
+for (f in 1:nrow(forest)){
+
+input_file <- paste0(input_data,forest[f,2],"Hz/",forest[f,2],"hz","trainingmetrics",forest[f,1], "seglength.csv" )
+data<-read.csv(input_file)
+
+print(paste("runnning model","smooth",forest[f,1],"freq",forest[f,2]))
+
+data$id<- gsub("[[:digit:]]", "", data$pango_seg) 
+data$id<-sub("_", "", data$id)
+
+
+#remove rolling, only one individual
+data<-data[!(data$behaviour=="roll"),]
+
+# this is for activity levels
+data$behaviour[data$behaviour == "pause"] <- "upright_sensing"
+data$behaviour[data$behaviour == "dig"] <- "high"
+data$behaviour[data$behaviour == "roll"] <- "high"
+data$behaviour[data$behaviour == "den"] <- "low"
+data$behaviour[data$behaviour == "upright_sensing"] <-"low"
+data$behaviour[data$behaviour == "feeding"] <-"medium"
+data$behaviour[data$behaviour == "grooming"] <- "low"
+data$behaviour[data$behaviour == "investigate_groung"] <- "medium"
+data$behaviour[data$behaviour == "walk"] <-"medium"
+data$behaviour[data$behaviour == "poop"] <-"low"
+data$behaviour[data$behaviour == "crash"] <- "medium"
+data$behaviour[data$behaviour == "fall"] <- "medium"
+data$behaviour[data$behaviour == "get up"] <- "medium"
+data$behaviour[data$behaviour == "turn"] <- "medium"
+data$behaviour[data$behaviour == "back"] <- "low"
+
+
+
+# 
+# run this for discrete behaviours and comment above
+#
+# data$behaviour[data$behaviour == "crash"] <- "walk"
+# data$behaviour[data$behaviour == "fall"] <- "walk"
+# data$behaviour[data$behaviour == "get up"] <- "walk"
+# data$behaviour[data$behaviour == "turn"] <- "walk"
+# 
+# data$behaviour[data$behaviour == "back"] <- "low"
+# data$behaviour[data$behaviour == "pause"] <- "low"
+# data$behaviour[data$behaviour == "den"] <- "low"
+# data$behaviour[data$behaviour == "upright_sensing"] <-"low"
+# data$behaviour[data$behaviour == "grooming"] <- "low"
+# data$behaviour[data$behaviour == "poop"] <-"low"
+# #
+
+
+table(data$behaviour)
+table(data$behaviour,data$id)
+
+data$behaviour<-as.factor(data$behaviour)
+data$id<-as.factor(data$id)
+
+data2<-data[,-1]
+
+##split data#
+intrain <- createDataPartition(y = data2$behaviour, p = .70, list = FALSE)
+training <- data2[intrain,]
+testing <- data2[-intrain,]
+
+# nrow(training)
+# nrow(testing)
+
+foldCaret <- function(dat, nm = 10) {
+  
+  #--------------------------------------------------------
+  # Create a folds index to keep cells together during cross-validation
+  # The resulting list "folds" is passed to "index" in the "trainControl" function in caret
+  # Keeps individuals together during splitting data for cross validation
+  
+  use.long <- dat
+  nm <- nm
+  
+  if (length(unique(use.long$id)) < nm) {
+    nm <- length(unique(use.long$id))
+  }
+  
+  rws <- floor(length(unique(use.long$id))/nm) #number of cells to include in each fold
+  cells <- unique(use.long$id)
+  folds <- list()
+  for (i in 1:nm) {
+    samp <- sample(x = cells, size = rws)
+    l <- list()
+    for (j in 1:length(samp)) {
+      k <- which(use.long$id == samp[j])
+      l[j] <- list(k)
+    }
+    l <- unlist(l)
+    folds[i] <- list(l)
+    for (r in 1:length(samp)) {
+      cells <- cells[cells != samp[r]]
+    }
+  }
+  
+  names(folds) <- paste0("fold_", c(1:nm)) #train needs list to be named
+  
+  return(folds)
+  
+} #maybe 19
+
+folds <- foldCaret(dat = training, nm = 10) #nm=numfolds #maybe 19
+
+#remove ID from training dataset after folds
+training<-subset(training, select = -c(id))
+testing2<-subset(testing, select = -c(id))
+
+######
+
+#upsampling for unequal group sizes https://topepo.github.io/caret/subsampling-for-class-imbalances.html
+tc <- trainControl(method = "cv",
+                   number = length(folds),
+                   index = folds,
+                   search = "grid",classProbs = TRUE, summaryFunction = multiClassSummary, verboseIter=FALSE, sampling = "up")#was search=random, savePred=T
+
+
+#########find best mtry, predefined ntree##########################
+
+## find the optimal mtry values. mtry can only be max num of variables putting nito the model
+
+rfGrid <-  data.frame(mtry = c(1:18),
+                      splitrule = "gini",
+                      min.node.size = c(1))
+
+ntree=1000
+
+set.seed(6)
+
+MOD.rf<-train(behaviour~., data=training, method="ranger", importance ='impurity',#or permutation. #or behaviour~.-id,  
+              trControl = tc,tuneGrid = rfGrid, verbose=FALSE, num.trees=ntree)#,metric = "multiROC")
+
+#ggplot(MOD.rf)
+
+tmp <- MOD.rf$results
+tmp <- tmp[order(tmp$AUC, decreasing = T),] #was AUC, not present in this output for some reason
+tmp <- tmp[1,] # Keep only the best score
+
+best.mtry<-tmp[1,1]
+
+##insert into final model here#
+
+#use best mtry in grid
+rfGrid <-  data.frame(mtry = best.mtry,
+                      splitrule = "gini",
+                      min.node.size = c(1))
+ntree=1000
+
+opt.rf<-train(behaviour~., data=training, method="ranger", importance ='impurity',#or permutation. #or behaviour~.-id,  
+              trControl = tc,tuneGrid = rfGrid, verbose=FALSE, num.trees=ntree ) 
+
+#ggplot(MOD.rf)
+
+# Variable importance
+tmp <- varImp(opt.rf)$importance
+tmp$variable <- row.names(tmp)
+#write.csv(tmp, "variable_importance50Hz5s.csv")
+
+#plot(varImp(opt.rf))
+
+accuracy<-predict(opt.rf, testing2) #, behaviour = "prob"
+confusion_matrix<-confusionMatrix(accuracy, testing$behaviour)
+
+CM_output1<-as.matrix(confusion_matrix,what="overall")
+CM_output2<-as.matrix(confusion_matrix, what = "classes")
+CM_output3<-as.matrix(confusion_matrix$table)
+
+final_accuracy <- confusion_matrix$overall[1]
+#print(final_accuracy )
+print(final_accuracy)
+forest[f,3]<-final_accuracy
+output_file <- paste0(input_data,forest[f,2],"Hz/",forest[f,2],"Hz","RF",forest[f,1], "smooth_020524_GROUPED" )
+
+saveRDS(opt.rf,paste0(output_file, "_bestRF_020524.RDS"))
+
+
+write.csv(CM_output1, paste0(output_file, "CM_output1_GROUPED.csv"))
+write.csv(CM_output2, paste0(output_file, "CM_output2_GROUPED.csv"))
+write.csv(CM_output3, paste0(output_file, "CM_output3_GROUPED.csv"))
+
+
+}
+
+
+write.csv(forest, "RFCORRECT_results_020524_GROUPED.csv")
