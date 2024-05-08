@@ -1,0 +1,170 @@
+rm(list=ls())
+library(dplyr)
+library(lubridate)
+library(zoo)
+library(tidyr)
+library(tidyverse)
+
+#This uses labels from BORIS. Change input for each subject
+setwd("C:/Users/user/Documents/R/Accelerometers/impi")
+data<-read.csv("02_S1.csv",sep = "", header = T) #accelerometer data
+
+head(data)
+tail(data)
+
+acc_data<-data
+
+acc_data$x <- paste(acc_data$Date,acc_data$Time)
+
+acc_data$time <- as.POSIXct(acc_data$x, "%d/%m/%Y %H:%M:%OS",tz = "UTC")
+
+#append number between 0 and 6 to OS to show millisecond digits
+#https://stackoverflow.com/questions/22037657/milliseconds-in-posixct-class
+
+acc_data$time<-format(acc_data$time, "%Y-%m-%d %H:%M:%OS2")
+# acc_data$label <- NA
+
+#import behaviour labesl from BORIS
+labs<-read.csv("impi_3.csv")
+
+#format label import time
+
+labs$timeformat<-as.POSIXct(labs$Time, origin="1970-01-01")
+
+labs$timeformat<-format(labs$timeformat,"%Y-%m-%d %H:%M:%OS2")
+
+
+##synchronise times on label import
+#time on video
+vidtime<-labs[1,]
+#remove timepoint from analysis
+labs<-labs[-c(1),]
+
+# pattern is to just remove _years_old
+vidtime_extract<-as.character(gsub(" UTC", "", vidtime$Comment))
+
+vidtime_extract<-paste(acc_data$Date[1],vidtime_extract)
+vidtime_extractFor<-as.POSIXct(vidtime_extract, "%d/%m/%Y %H:%M:%OS",tz = "UTC")
+vidtime_extractFor<-format(vidtime_extractFor,"%Y-%m-%d %H:%M:%OS2")
+
+timeoffset<-as.numeric(difftime(vidtime_extractFor, vidtime$timeformat, units="secs"))
+
+labs$timecorr<- labs$Time+ timeoffset
+
+labs$timecorr<-as.POSIXct(labs$timecorr, origin="1970-01-01")
+
+labs$timecorr_ms<-format(labs$timecorr,"%Y-%m-%d %H:%M:%OS2")
+
+
+#now format for intervals
+#long to wide and format
+data_wide <- spread(labs, Behavior.type, timecorr)
+data_wide
+
+data_wide$START<-na.locf(data_wide$START,na.rm = FALSE)
+
+data_wide<-data_wide %>% drop_na(STOP)
+
+#final dataframe for time interval labs
+labs_finalFormat<-data_wide %>% select('Behavior','START', 'STOP')
+
+#remove milisecond error in label recordings
+#round start up to next second
+labs_finalFormat$START_ms<-format(labs_finalFormat$START,"%Y-%m-%d %H:%M:%OS2")
+labs_finalFormat$START_round <- ceiling_date(labs_finalFormat$START, unit = "1 second")
+
+#round stop down to previous second
+labs_finalFormat$STOP_ms<-format(labs_finalFormat$STOP,"%Y-%m-%d %H:%M:%OS2")
+labs_finalFormat$STOP_round <- floor_date(labs_finalFormat$STOP, unit = "1 second")
+
+labs_finalCLean<- labs_finalFormat[,c(1,5,7)]
+
+labs_finalCLean$START_round<-format(labs_finalCLean$START_round, "%Y-%m-%d %H:%M:%OS2")
+labs_finalCLean$STOP_round<-format(labs_finalCLean$STOP_round, "%Y-%m-%d %H:%M:%OS2")
+
+#df2 should be accelerometer data
+#df1 should be intervals
+labs_finalCLean <- labs_finalCLean %>% 
+  rename("START"="START_round" ,
+         "STOP" = "STOP_round")
+
+
+
+#remove any observations less than 2 seconds (otherwise nothing left after trimming)
+#find time diff in seconds
+labs_finalCLean$interval<-as.numeric(difftime(labs_finalCLean$STOP, labs_finalCLean$START))
+#remove labels less than 2 seconds
+labs_finalCLean2 <-labs_finalCLean[labs_finalCLean$interval > 2, ] 
+
+#cut ends of period. add 1 sec to start, remove 1 sec from end to account for time synch errors
+labs_finalCLean2$START<-as.POSIXct(labs_finalCLean2$START, "%Y-%m-%d %H:%M:%OS",tz = "UTC")
+labs_finalCLean2$START_buf<-labs_finalCLean2$START + 1
+labs_finalCLean2$STOP<-as.POSIXct(labs_finalCLean2$STOP, "%Y-%m-%d %H:%M:%OS",tz = "UTC")
+labs_finalCLean2$STOP_buf<-labs_finalCLean2$STOP - 1
+
+##clean dataframe
+labs_finalCLean3<- labs_finalCLean2[,c(1,5,6)]
+
+labs_finalCLean3 <- labs_finalCLean3 %>% 
+  rename("START"="START_buf" ,
+         "STOP" = "STOP_buf")
+
+#now trim acc to start of observations to reduce processing time
+acc_data_trim<-acc_data[acc_data$time > vidtime_extractFor,]
+
+
+
+#now label accelerometer data!!
+df1<-labs_finalCLean3
+
+df2<-acc_data_trim
+
+
+df1 <- as_tibble(df1) |> 
+  mutate(across(c(START, STOP), ymd_hms))
+
+df2 <- as_tibble(df2) |> 
+  mutate(x = dmy_hms(x))
+
+newdf<-df2 |> 
+  left_join(df1, join_by(between(x, START, STOP))) 
+#|> 
+ # select(x, time, Behavior)
+
+#cleanup output
+newdf<-as.data.frame(newdf)
+
+newdf$time_form <- as.POSIXct(newdf$time, "%Y-%m-%d %H:%M:%OS",tz = "UTC")
+
+#options(max.print=500)
+
+colnames(newdf)
+
+newdf_short<-newdf[,c(4,5,6,17,18,19,20,21)]
+
+newdf_short<-newdf_short %>% drop_na(Behavior)
+
+newdf_short$time<-format(newdf_short$time, "%Y-%m-%d %H:%M:%OS2")
+
+
+write.csv(newdf_short, "impi_labs.csv")
+
+#check labels look OK
+library(plotly)
+plot_ly(x = newdf_short$time_form, 
+        y = newdf_short$X, 
+        mode = 'scatter', 
+        color = as.factor(newdf_short$Behavior))
+
+
+plot_ly(x = newdf_short$time_form, 
+        y = newdf_short$Y, 
+        mode = 'scatter', 
+        color = as.factor(newdf_short$Behavior))
+
+
+
+plot_ly(x = newdf_short$time_form, 
+        y = newdf_short$Z, 
+        mode = 'scatter', 
+        color = as.factor(newdf_short$Behavior))
